@@ -28,13 +28,15 @@ hearts = """Вы хотите сердечко сейчас?
 @bot.message_handler(commands=["start"])
 def start(message):
     mainmenu = types.InlineKeyboardMarkup()
-    key0 = types.InlineKeyboardButton(text="Запустить", url="https://t.me/DA_HET_bot")
+    key0 = types.InlineKeyboardButton(
+        text="Запустить бота ДА/НЕТ от этого автора.", url="https://t.me/DA_HET_bot"
+    )
     mainmenu.add(key0)
     bot.send_message(
         message.from_user.id,
         """Здравствуйте!\n
-Этот бот создан пользователем @RufiColumbae в 2026 году.\n
-Он выбирает ваше cердечко на данный день. Также есть у нас ещё бот:""",
+Этот бот создан пользователем @KAPAC1D в 2026 году.\n
+Он выбирает ваше cердечко на данный день. Для запуска нажмите Menu и выберите функцию. Также есть у нас ещё бот:""",
         reply_markup=mainmenu,
     )
 
@@ -72,9 +74,9 @@ def callback_inline(call):
                 "💓 - мифическое сердечко",
                 "💗 - мифическое сердечко",
                 "💖 - мифическое сердечко",
-                "💝 - ЛЕГЕНДАРНОЕ СЕРДЕЧКО!!! Делай скриншот и отпрвляй @RufiColumbae !",
-                "❣️ - ЛЕГЕНДАРНОЕ СЕРДЕЧКО!!! Делай скриншот и отпрвляй @RufiColumbae !",
-                "❤️‍🔥 - НЕВОЗМОЖНО ПОЛУЧИМОЕ СЕРДЕЧКО!!! Делай скриншот и отпрвляй @RufiColumbae !",
+                "💝 - ЛЕГЕНДАРНОЕ СЕРДЕЧКО!!! Делай скриншот и отпрвляй @KAPAC1D !",
+                "❣️ - ЛЕГЕНДАРНОЕ СЕРДЕЧКО!!! Делай скриншот и отпрвляй @KAPAC1D !",
+                "❤️‍🔥 - НЕВОЗМОЖНО ПОЛУЧИМОЕ СЕРДЕЧКО!!! Делай скриншот и отпрвляй @KAPAC1D !",
             ],
             weights=[
                 0.11,
@@ -134,7 +136,7 @@ def callback_inline(call):
         )
 
 
-@bot.message_handler(commands=["ot3blv"])
+@bot.message_handler(commands=["OT3blB"])
 def get_text_messages_(message: Message):
     if message.from_user is not None:
         bot.send_message(
