@@ -5,5 +5,7 @@ description = "Random heart bot for telegram by Maresiy"
 requires-python = ">=3.13,<3.14"
 dependencies = [
     "telebot",
-    "python-dotenv"
+    "python-dotenv",
+    "sqlalchemy",
+    "sqlalchemy.orm"
 ]

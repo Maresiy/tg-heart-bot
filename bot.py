@@ -6,12 +6,21 @@ from dotenv import load_dotenv
 from telebot import types
 from telebot.types import InlineKeyboardButton, InlineKeyboardMarkup, Message
 
+from db import (
+    add_or_update_user,
+    get_all_users,
+    get_latest_events,
+    get_user_count,
+    init_db,
+    log_event,
+)
+
 # Загружаем переменные из .env
 load_dotenv()
 
 # Получаем значение TOKEN
 token = os.getenv("TOKEN") or ""
-
+init_db()
 bot = telebot.TeleBot(token)
 print(token)
 hearts = """Вы хотите сердечко сейчас?
@@ -29,7 +38,8 @@ hearts = """Вы хотите сердечко сейчас?
 def start(message):
     mainmenu = types.InlineKeyboardMarkup()
     key0 = types.InlineKeyboardButton(
-        text="Запустить бота ДА/НЕТ от этого автора.", url="https://t.me/DA_HET_bot"
+        text="Запустить бота ДА/НЕТ от этого автора.(пока не работает)",
+        url="https://t.me/DA_HET_bot",
     )
     mainmenu.add(key0)
     bot.send_message(
@@ -43,6 +53,12 @@ def start(message):
 
 @bot.message_handler(commands=["heart"])
 def get_text_messages(message: Message):
+    if message.from_user is not None:
+        add_or_update_user(
+            message.from_user.id,
+            message.from_user.username,
+            message.from_user.full_name,
+        )
     mainmenu = types.InlineKeyboardMarkup()
     key1 = types.InlineKeyboardButton(text="Получить сердечко", callback_data="but1")
     key2 = types.InlineKeyboardButton(text="Шансы", callback_data="but2")
@@ -79,27 +95,27 @@ def callback_inline(call):
                 "❤️‍🔥 - НЕВОЗМОЖНО ПОЛУЧИМОЕ СЕРДЕЧКО!!! Делай скриншот и отпрвляй @KAPAC1D !",
             ],
             weights=[
-                0.11,
-                0.11,
-                0.11,
-                0.11,
-                0.09,
-                0.09,
-                0.09,
-                0.05,
-                0.05,
-                0.05,
-                0.03,
-                0.03,
-                0.015,
-                0.015,
-                0.015,
+                0.12,
+                0.12,
+                0.12,
+                0.12,
+                0.10,
+                0.10,
+                0.10,
+                0.04,
+                0.04,
+                0.04,
+                0.02,
+                0.02,
+                0.01,
+                0.01,
+                0.01,
                 0.008,
                 0.008,
                 0.008,
-                0.0045,
-                0.0045,
-                0.002,
+                0.0025,
+                0.0025,
+                0.001,
             ],
             k=1,
         )
@@ -112,14 +128,14 @@ def callback_inline(call):
         mainmenu.add(key3)
         bot.edit_message_text(
             """Шансы:
-        Обычное сердечко - 44%
-        Необычное сердечко - 27%
-        Редкое сердечко - 15%
-        Очень редкое сердечко - 6%
-        Эпическое сердечко - 4.5%
+        Обычное сердечко - 48%
+        Необычное сердечко - 30%
+        Редкое сердечко - 12%
+        Очень редкое сердечко - 4%
+        Эпическое сердечко - 3%
         Мифическое сердечко - 2.4%
-        Легендарное сердечко - 0.9%
-        Невозможное сердечко - 0.2%""",
+        Легендарное сердечко - 0.5%
+        Невозможное сердечко - 0.1%""",
             call.message.chat.id,
             call.message.message_id,
             reply_markup=mainmenu,
@@ -136,12 +152,51 @@ def callback_inline(call):
         )
 
 
-@bot.message_handler(commands=["OT3blB"])
+@bot.message_handler(commands=["feedback"])
 def get_text_messages_(message: Message):
     if message.from_user is not None:
-        bot.send_message(
-            message.from_user.id, """Напишите, что хотите добавить @RufiColumbae."""
+        add_or_update_user(
+            message.from_user.id,
+            message.from_user.username,
+            message.from_user.full_name,
         )
+    if message.from_user is not None:
+        bot.send_message(
+            message.from_user.id, """Напишите, что хотите добавить @KAPAC1D."""
+        )
+
+
+@bot.message_handler(commands=["stats"])
+def handle_stats(message):
+    if message.from_user is not None:
+        add_or_update_user(
+            message.from_user.id,
+            message.from_user.username,
+            message.from_user.full_name,
+        )
+        log_event(message.from_user.id, "stats")
+    cnt = get_user_count()
+    bot.reply_to(message, f"Всего пользователей: {cnt}")
+
+
+@bot.message_handler(commands=["users"])
+def handle_users(message):
+    if message.from_user is not None:
+        add_or_update_user(
+            message.from_user.id,
+            message.from_user.username,
+            message.from_user.full_name,
+        )
+        # Для безопасности можно ограничить, например, по ID админа
+        log_event(message.from_user.id, "users")
+    users = get_all_users()
+    if not users:
+        bot.reply_to(message, "Пока ни одного пользователя.")
+        return
+    lines = []
+    for uid, uname, fname in users:
+        lines.append(f"• {fname} (@{uname or 'нет'})")
+    bot.reply_to(message, "Список пользователей:\n" + "\n".join(lines))
 
 
 bot.polling(none_stop=True, interval=0)
