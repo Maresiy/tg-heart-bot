@@ -1,5 +1,7 @@
 import os
 import random
+import sys
+from enum import Enum
 
 import telebot
 from dotenv import load_dotenv
@@ -20,9 +22,25 @@ load_dotenv()
 
 # Получаем значение TOKEN
 token = os.getenv("TOKEN") or ""
+if not token:
+    print("TOKEN not found in .env")
+    sys.exit(0)
+
 init_db()
+
+
+class UsersStates(Enum):
+    DEFAULT = 1
+    FEEDBACKKING = 2
+
+
+admin = int(os.getenv("ADMIN") or "0")
+admins = [admin] if admin else []
+users_states: dict[int, UsersStates] = {}
+
 bot = telebot.TeleBot(token)
-print(token)
+
+
 hearts = """Вы хотите сердечко сейчас?
     ❤️‍🩹,🩷,🖤,💜 - обычные сердечки;
     🩶,🤍,🤎 - необычные сердечки;
@@ -46,7 +64,7 @@ def start(message):
         message.from_user.id,
         """Здравствуйте!\n
 Этот бот создан пользователем @KAPAC1D в 2026 году.\n
-Он выбирает ваше cердечко на данный день. Для запуска нажмите Menu и выберите функцию. Также есть у нас ещё бот:""",
+Он выбирает ваше cердечко сейчас. Для запуска нажмите Menu и выберите функцию. Также есть у нас ещё бот:""",
         reply_markup=mainmenu,
     )
 
@@ -160,10 +178,11 @@ def get_text_messages_(message: Message):
             message.from_user.username,
             message.from_user.full_name,
         )
-    if message.from_user is not None:
         bot.send_message(
-            message.from_user.id, """Напишите, что хотите добавить @KAPAC1D."""
+            message.from_user.id,
+            """Напишите ЗДЕСЬ, что хотите добавить автору (@KAPAC1D) .""",
         )
+        users_states[message.from_user.id] = UsersStates.FEEDBACKKING
 
 
 @bot.message_handler(commands=["stats"])
@@ -181,6 +200,8 @@ def handle_stats(message):
 
 @bot.message_handler(commands=["users"])
 def handle_users(message):
+    if message.from_user.id not in admins:
+        return
     if message.from_user is not None:
         add_or_update_user(
             message.from_user.id,
@@ -195,8 +216,26 @@ def handle_users(message):
         return
     lines = []
     for uid, uname, fname in users:
-        lines.append(f"• {fname} (@{uname or 'нет'})")
+        lines.append(f"• {fname} (@{uname or 'нет'}) ")
     bot.reply_to(message, "Список пользователей:\n" + "\n".join(lines))
 
 
+@bot.message_handler()
+def handle_text(message: Message):
+    if (
+        message.from_user is not None
+        and message.text is not None
+        and users_states.get(message.from_user.id, UsersStates.DEFAULT)
+        == UsersStates.FEEDBACKKING
+    ):
+        bot.send_message(
+            admins[0],
+            f"Доставлено новое сообщение от {message.from_user.full_name} (@{message.from_user.username or 'нет'}):\n"
+            + message.text,
+        )
+        bot.send_message(message.from_user.id, "Успешно доставлено.")
+        users_states[message.from_user.id] = UsersStates.DEFAULT
+
+
+print("bot is starting...")
 bot.polling(none_stop=True, interval=0)
