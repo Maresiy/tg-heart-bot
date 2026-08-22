@@ -7,5 +7,7 @@ dependencies = [
     "telebot",
     "python-dotenv",
     "sqlalchemy",
-    "sqlalchemy.orm"
+    "sqlalchemy.orm",
+    "schedule",
+    "requests[socks]",
 ]
