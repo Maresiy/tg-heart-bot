@@ -1,0 +1,13 @@
+[project]
+name = "tg-heart-bot"
+version = "0.1.1"
+description = "Random heart bot for telegram by Maresiy"
+requires-python = ">=3.13,<3.14"
+dependencies = [
+    "telebot",
+    "python-dotenv",
+    "sqlalchemy",
+    "sqlalchemy.orm",
+    "schedule",
+    "requests[socks]",
+]
