@@ -15,7 +15,7 @@ from db import (
     SessionLocal,
     UserAchievement,
     add_heart_to_collection,
-    add_heart_win,  # ← новая функция
+    add_heart_win,
     add_or_update_user,
     add_referral_bonus,
     add_xp,
@@ -35,10 +35,6 @@ from db import (
     get_leaderboard_legendary,
     get_leaderboard_total_hearts,
     get_leaderboard_xp,
-    get_referral_link,
-    get_top_legendary_users,  # ← новая функция
-    get_top_xp_users,
-    get_user_achievements,  # если нужна функция, добавьте её ниже
     get_user_by_telegram_id,
     get_user_collection,
     get_user_count,
@@ -48,6 +44,7 @@ from db import (
     init_db,
     log_event,
     process_referral,
+    reset_attempts_for_user,
     reset_daily_attempts,
     resolve_duel,
     select,
@@ -71,7 +68,7 @@ if proxy:
 
 
 def run_scheduler():
-    schedule.every().day.at("15:30").do(reset_daily_attempts)
+    schedule.every().day.at("00:00").do(reset_daily_attempts)
     while True:
         schedule.run_pending()
         time.sleep(60)
@@ -135,8 +132,6 @@ users_states: dict[int, UsersStates] = {}
 
 bot = telebot.TeleBot(token)
 
-# Получаем username бота для реферальных ссылок (может быть недоступно до запуска)
-
 
 def register_user(message_or_call: types.Message | types.CallbackQuery) -> None:
     """Регистрирует пользователя в БД, если его ещё нет."""
@@ -163,7 +158,6 @@ def start(message: Message):
     if user is None:
         return
 
-    # Проверяем реферальный параметр
     referrer_id = None
     parts = message.text.split() if message.text else []
     if len(parts) > 1 and parts[1].startswith("ref_"):
@@ -173,35 +167,37 @@ def start(message: Message):
             pass
 
     existing_user = get_user_by_telegram_id(user.id)
-    ref_success = False  # ← инициализация
-    ref_msg = ""  # можно и пустую строку
+    ref_success = False
+    ref_msg = ""
 
     if existing_user is None and referrer_id is not None:
         ref_success, ref_msg = process_referral(user.id, referrer_id)
 
-    # Регистрируем пользователя
     register_user(message)
 
-    # Если новый пользователь пришёл по реферальной ссылке и рефереру начислен бонус
     if existing_user is None and referrer_id is not None and ref_success:
         add_referral_bonus(user.id, referrer_id)
-        # Проверяем достижения для нового пользователя и пригласившего
         check_and_unlock_achievements(user.id)
         check_and_unlock_achievements(referrer_id)
-        # ... дополнительная логика
 
-    # Остальное приветствие
     mainmenu = types.InlineKeyboardMarkup()
     key0 = types.InlineKeyboardButton(
-        text="Запустить бота ДА/НЕТ от этого автора.(пока не работает)",
-        url="https://t.me/DA_HET_bot",
+        text="Запустить бота Гая", url="https://t.me/GAJ_popuGAJ_bot"
+    )
+    key2 = types.InlineKeyboardButton(
+        text="Запустить бота Да/Нет", url="https://t.me/DA_HET_bot"
+    )
+    key3 = types.InlineKeyboardButton(
+        text="Новости бота (канал)", url="https://t.me/channel_evoworld"
     )
     mainmenu.add(key0)
+    mainmenu.add(key2)
+    mainmenu.add(key3)
     bot.send_message(
         user.id,
         """Здравствуйте!\n
 Этот бот создан пользователем @KAPAC1D в 2026 году.\n
-Он выбирает ваше cердечко сейчас. Для запуска нажмите Menu и выберите функцию. Также есть у нас ещё бот:""",
+Он выбирает ваше cердечко сейчас. Для запуска нажмите Menu и выберите функцию. Также есть у нас есть другие боты и канал с новостями:""",
         reply_markup=mainmenu,
     )
 
@@ -217,7 +213,11 @@ def get_text_messages(message: Message):
     mainmenu = types.InlineKeyboardMarkup()
     key1 = types.InlineKeyboardButton(text="Получить сердечко", callback_data="but1")
     key2 = types.InlineKeyboardButton(text="Шансы", callback_data="but2")
+    key3 = types.InlineKeyboardButton(
+        text="Получить сердечки за все попытки", callback_data="but_all"
+    )
     mainmenu.add(key1, key2)
+    mainmenu.add(key3)
     if message.from_user is not None:
         bot.send_message(message.from_user.id, hearts, reply_markup=mainmenu)
 
@@ -232,8 +232,6 @@ def handle_profile(message: Message):
         bot.reply_to(message, "Сначала отправьте /start")
         return
     level, xp, attempts = profile
-    # Если нужно вычислить до следующего уровня:
-    # next_level_xp = (level) ** 2 * 100
     bot.reply_to(
         message,
         f"📊 Ваш профиль:\nУровень: {level}\nОпыт: {xp} XP\nПопытки: {attempts}",
@@ -250,13 +248,10 @@ def callback_inline(call):
             )
             return
 
-        # 2. Получение сердечка
         result = hearts_pool.get_random()
 
-        # 3. Добавляем в коллекцию (ОДИН раз, всегда)
         add_heart_to_collection(call.from_user.id, result.character)
 
-        # 4. Если легендарное/невозможное — сохраняем и уведомляем в канал
         if result.character in ["💝", "❣️", "❤️‍🔥"]:
             add_heart_win(call.from_user.id, result.character, result.win_description)
             try:
@@ -268,17 +263,14 @@ def callback_inline(call):
             except Exception as e:
                 print(f"Не удалось отправить в канал: {e}")
 
-        # 5. Начисление XP (один раз)
         xp_amount = XP_BY_CHARACTER.get(result.character, 0)
         level_up_msg = add_xp(call.from_user.id, xp_amount)
 
-        # 6. Обновляем задания (всегда)
         ensure_daily_quests(call.from_user.id)
         update_quest_progress(call.from_user.id, "collect_10", 1)
         if result.character in ["💝", "❣️", "❤️‍🔥"]:
             update_quest_progress(call.from_user.id, "collect_legendary", 1)
 
-        # 7. Проверяем достижения (всегда)
         new_ach = check_and_unlock_achievements(call.from_user.id)
         if new_ach:
             names = ", ".join(new_ach)
@@ -286,7 +278,6 @@ def callback_inline(call):
                 call.id, f"🏅 Достижения: {names}!", show_alert=True
             )
 
-        # 8. Сообщение с результатом
         bot.edit_message_text(
             f"Вам выпало: {result.character} - {result.win_description} "
             f"с шансом {100 * result.weight / hearts_pool.get_weights_sum()}%",
@@ -294,11 +285,57 @@ def callback_inline(call):
             call.message.message_id,
         )
 
-        # 9. Уведомление о повышении уровня (если есть)
         if level_up_msg:
             bot.answer_callback_query(call.id, level_up_msg, show_alert=True)
 
-    if call.data == "but2":
+    elif call.data == "but_all":
+        attempts = get_attempts_left(call.from_user.id)
+        if attempts <= 0:
+            bot.answer_callback_query(call.id, "У тебя нет попыток 😢", show_alert=True)
+            return
+
+        results = []
+        for _ in range(attempts):
+            result = hearts_pool.get_random()
+            results.append(result)
+
+            add_heart_to_collection(call.from_user.id, result.character)
+
+            if result.character in ["💝", "❣️", "❤️‍🔥"]:
+                add_heart_win(
+                    call.from_user.id, result.character, result.win_description
+                )
+                try:
+                    bot.send_message(
+                        f"@{CHANNEL_USERNAME}",
+                        f"🎉 Пользователь {call.from_user.full_name} (@{call.from_user.username or 'нет'}) получил {result.character} - {result.win_description}",
+                        parse_mode="HTML",
+                    )
+                except Exception as e:
+                    print(f"Не удалось отправить в канал: {e}")
+
+            xp_amount = XP_BY_CHARACTER.get(result.character, 0)
+            add_xp(call.from_user.id, xp_amount)
+
+            ensure_daily_quests(call.from_user.id)
+            update_quest_progress(call.from_user.id, "collect_10", 1)
+            if result.character in ["💝", "❣️", "❤️‍🔥"]:
+                update_quest_progress(call.from_user.id, "collect_legendary", 1)
+
+        reset_attempts_for_user(call.from_user.id, 0)
+
+        new_ach = check_and_unlock_achievements(call.from_user.id)
+        if new_ach:
+            names = ", ".join(new_ach)
+            bot.answer_callback_query(
+                call.id, f"🏅 Достижения: {names}!", show_alert=True
+            )
+
+        hearts_str = " ".join([r.character for r in results])
+        summary = f"Вы получили {len(results)} сердечек:\n{hearts_str}"
+        bot.edit_message_text(summary, call.message.chat.id, call.message.message_id)
+
+    elif call.data == "but2":
         mainmenu = types.InlineKeyboardMarkup()
         key3 = types.InlineKeyboardButton(text="Назад", callback_data="but3")
         mainmenu.add(key3)
@@ -316,18 +353,23 @@ def callback_inline(call):
             call.message.message_id,
             reply_markup=mainmenu,
         )
-    if call.data == "but3":
+
+    elif call.data == "but3":
         mainmenu = types.InlineKeyboardMarkup()
         key1 = types.InlineKeyboardButton(
             text="Получить сердечко", callback_data="but1"
         )
         key2 = types.InlineKeyboardButton(text="Шансы", callback_data="but2")
+        key3 = types.InlineKeyboardButton(
+            text="Получить сердечки за все попытки", callback_data="but_all"
+        )
         mainmenu.add(key1, key2)
+        mainmenu.add(key3)
         bot.edit_message_text(
             hearts, call.message.chat.id, call.message.message_id, reply_markup=mainmenu
         )
 
-    if call.data == "check_subscription":
+    elif call.data == "check_subscription":
         user_id = call.from_user.id
         try:
             member = bot.get_chat_member(f"@{CHANNEL_USERNAME}", user_id)
@@ -335,11 +377,18 @@ def callback_inline(call):
                 success, msg = claim_subscription_bonus(user_id)
                 if success:
                     bot.answer_callback_query(call.id, msg)
-                    bot.edit_message_text(
-                        "Поздравляем! Вы получили +10 попыток.",
-                        call.message.chat.id,
-                        call.message.message_id,
-                    )
+                    if call.message is not None:
+                        bot.edit_message_text(
+                            "Поздравляем! Вы получили +10 попыток.",
+                            call.message.chat.id,
+                            call.message.message_id,
+                        )
+                    else:
+                        bot.answer_callback_query(
+                            call.id,
+                            "Поздравляем! Вы получили +10 попыток.",
+                            show_alert=True,
+                        )
                 else:
                     bot.answer_callback_query(call.id, msg, show_alert=True)
             else:
@@ -355,41 +404,8 @@ def callback_inline(call):
                 "Не удалось проверить подписку. Попробуйте позже.",
                 show_alert=True,
             )
-            if call.data == "leaderboard_xp":
-                top = get_leaderboard_xp(10)
-                text = "🏆 Топ по XP:\n"
-                for i, (user, xp) in enumerate(top, start=1):
-                    text += (
-                        f"{i}. {user.full_name} (@{user.username or 'нет'}) — {xp} XP\n"
-                    )
-                bot.edit_message_text(
-                    text, call.message.chat.id, call.message.message_id
-                )
-            elif call.data == "leaderboard_hearts":
-                top = get_leaderboard_total_hearts(10)
-                text = "❤️ Топ по общему количеству сердечек:\n"
-                for i, (user, total) in enumerate(top, start=1):
-                    text += f"{i}. {user.full_name} (@{user.username or 'нет'}) — {total} шт.\n"
-                bot.edit_message_text(
-                    text, call.message.chat.id, call.message.message_id
-                )
-            elif call.data == "leaderboard_legendary":
-                top = get_leaderboard_legendary(10)
-                text = "💎 Топ по легендарным и невозможным сердечкам:\n"
-                for i, (user, total) in enumerate(top, start=1):
-                    text += f"{i}. {user.full_name} (@{user.username or 'нет'}) — {total} шт.\n"
-                bot.edit_message_text(
-                    text, call.message.chat.id, call.message.message_id
-                )
-            elif call.data == "leaderboard_collection":
-                top = get_leaderboard_collection(10)
-                text = "📦 Топ по уникальным сердечкам в коллекции:\n"
-                for i, (user, unique) in enumerate(top, start=1):
-                    text += f"{i}. {user.full_name} (@{user.username or 'нет'}) — {unique} видов\n"
-                bot.edit_message_text(
-                    text, call.message.chat.id, call.message.message_id
-                )
-    if call.data.startswith("challenge:"):
+
+    elif call.data.startswith("challenge:"):
         opponent_id = int(call.data.split(":")[1])
         challenger_id = call.from_user.id
 
@@ -426,41 +442,45 @@ def callback_inline(call):
                 call.id, "Не удалось найти соперника.", show_alert=True
             )
 
-    if call.data.startswith("accept_duel:"):
+    elif call.data.startswith("accept_duel:"):
         duel_id = int(call.data.split(":")[1])
         result_msg = resolve_duel(duel_id)
         duel = get_duel_by_id(duel_id)
         if duel:
-            # Если нажал инициатор, отправляем сообщение оппоненту
             if call.from_user.id == duel.challenger_id:
                 bot.send_message(duel.opponent_id, result_msg)
             else:
-                # Если нажал оппонент, отправляем сообщение инициатору
                 bot.send_message(duel.challenger_id, result_msg)
 
-            # Редактируем сообщение с кнопками у нажавшего (результат виден там)
             bot.edit_message_text(
                 result_msg, call.message.chat.id, call.message.message_id
             )
 
-            # Проверяем достижения для обоих
             new_ach = check_and_unlock_achievements(call.from_user.id)
             if new_ach:
                 names = ", ".join(new_ach)
                 bot.answer_callback_query(
                     call.id, f"🏅 Достижения: {names}!", show_alert=True
                 )
-                new_ach = check_and_unlock_achievements(duel.challenger_id)
-                if new_ach:
-                    bot.send_message(
-                        duel.challenger_id, "🏅 Новые достижения: " + ", ".join(new_ach)
-                    )
+
+            new_ach_opponent = check_and_unlock_achievements(duel.opponent_id)
+            if new_ach_opponent:
+                bot.send_message(
+                    duel.opponent_id,
+                    "🏅 Новые достижения: " + ", ".join(new_ach_opponent),
+                )
+            new_ach_challenger = check_and_unlock_achievements(duel.challenger_id)
+            if new_ach_challenger:
+                bot.send_message(
+                    duel.challenger_id,
+                    "🏅 Новые достижения: " + ", ".join(new_ach_challenger),
+                )
         else:
             bot.answer_callback_query(
                 call.id, "Ошибка: дуэль не найдена.", show_alert=True
             )
 
-    if call.data.startswith("decline_duel:"):
+    elif call.data.startswith("decline_duel:"):
         duel_id = int(call.data.split(":")[1])
         result_msg = decline_duel(duel_id)
         duel = get_duel_by_id(duel_id)
@@ -475,7 +495,8 @@ def callback_inline(call):
             bot.answer_callback_query(
                 call.id, "Ошибка: дуэль не найдена.", show_alert=True
             )
-    if call.data == "leaderboard_xp":
+
+    elif call.data == "leaderboard_xp":
         top = get_leaderboard_xp(10)
         text = "🏆 Топ по XP:\n"
         for i, (user, xp) in enumerate(top, start=1):
@@ -544,7 +565,6 @@ def handle_users(message):
             message.from_user.username,
             message.from_user.full_name,
         )
-        # Для безопасности можно ограничить, например, по ID админа
         log_event(message.from_user.id, "users")
     users = get_all_users()
     if not users:
@@ -558,11 +578,9 @@ def handle_users(message):
 
 def get_subscribe_keyboard() -> types.InlineKeyboardMarkup:
     keyboard = types.InlineKeyboardMarkup()
-    # Кнопка-ссылка на канал
     url_btn = types.InlineKeyboardButton(
         text="📢 Подписаться на канал", url=f"https://t.me/{CHANNEL_USERNAME}"
     )
-    # Кнопка проверки подписки
     check_btn = types.InlineKeyboardButton(
         text="✅ Проверить подписку", callback_data="check_subscription"
     )
@@ -573,7 +591,7 @@ def get_subscribe_keyboard() -> types.InlineKeyboardMarkup:
 
 @bot.message_handler(commands=["bonus"])
 def handle_bonus(message: Message):
-    register_user(message)  # на всякий случай регистрируем
+    register_user(message)
     if message.from_user is not None:
         bot.send_message(
             message.from_user.id,
@@ -582,53 +600,8 @@ def handle_bonus(message: Message):
         )
 
 
-@bot.callback_query_handler(func=lambda call: call.data == "check_subscription")
-def callback_check_subscription(call: types.CallbackQuery):
-    user_id = call.from_user.id
-
-    # Проверяем подписку через Bot API
-    try:
-        member = bot.get_chat_member(f"@{CHANNEL_USERNAME}", user_id)
-        # Допустимые статусы: участник, администратор, создатель
-        if member.status in ["member", "administrator", "creator"]:
-            success, msg = claim_subscription_bonus(user_id)
-            if success:
-                bot.answer_callback_query(call.id, msg)
-                # Обновим сообщение, убрав кнопки
-                if call.message is not None:
-                    bot.edit_message_text(
-                        "Поздравляем! Вы получили +10 попыток.",
-                        call.message.chat.id,
-                        call.message.message_id,
-                    )
-                else:
-                    # Если сообщение недоступно, отправляем новое или используем answer_callback_query
-                    bot.answer_callback_query(
-                        call.id,
-                        "Поздравляем! Вы получили +10 попыток.",
-                        show_alert=True,
-                    )
-
-            else:
-                bot.answer_callback_query(call.id, msg, show_alert=True)
-        else:
-            bot.answer_callback_query(
-                call.id,
-                "Вы ещё не подписались на канал. Подпишитесь и попробуйте снова.",
-                show_alert=True,
-            )
-    except Exception as e:
-        print(f"Ошибка проверки подписки: {e}")
-        bot.answer_callback_query(
-            call.id,
-            "Не удалось проверить подписку. Убедитесь, что бот является администратором канала (если канал приватный) или канал публичный.",
-            show_alert=True,
-        )
-
-
 @bot.message_handler(commands=["redeem"])
 def handle_redeem(message: Message):
-    # Проверяем, что после команды есть текст (сам код)
     if message.text is not None and message.from_user is not None:
         parts = message.text.split(maxsplit=1)
         if len(parts) < 2:
@@ -641,7 +614,7 @@ def handle_redeem(message: Message):
 
 @bot.message_handler(commands=["daily"])
 def handle_daily(message: Message):
-    register_user(message)  # убедимся, что пользователь в базе
+    register_user(message)
     if message.text is not None and message.from_user is not None:
         success, msg = claim_daily_bonus(message.from_user.id)
         bot.reply_to(message, msg)
@@ -674,7 +647,7 @@ def handle_collection(message: Message):
 @bot.message_handler(commands=["achievements"])
 def handle_achievements(message: Message):
     register_user(message)
-    user_ach = {}  # ← инициализация пустым словарём
+    user_ach = {}
     with SessionLocal() as session:
         all_ach = session.scalars(select(Achievement)).all()
         if message.from_user is not None:
